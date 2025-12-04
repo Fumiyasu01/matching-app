@@ -4,7 +4,11 @@ import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { ensureAuthenticated } from '@/lib/auth'
 import { queryKeys } from '@/lib/query-keys'
+import { mockProfiles } from '@/lib/mock-data'
 import type { Profile } from '@/types/database'
+
+// Set to true to use mock data for testing
+const USE_MOCK_DATA = true
 
 export function useDiscoverProfiles() {
   const supabase = createClient()
@@ -12,6 +16,11 @@ export function useDiscoverProfiles() {
   return useQuery({
     queryKey: queryKeys.discoverProfiles,
     queryFn: async (): Promise<Profile[]> => {
+      // Return mock data if enabled
+      if (USE_MOCK_DATA) {
+        return mockProfiles
+      }
+
       const user = await ensureAuthenticated()
 
       // 自分がスワイプ済みのユーザーIDを取得
