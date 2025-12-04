@@ -1,29 +1,49 @@
-import { redirect } from 'next/navigation'
-import { createClient } from '@/lib/supabase/server'
-import { LogoutButton } from '@/components/auth/LogoutButton'
+'use client'
 
-export default async function ProfilePage() {
-  const supabase = await createClient()
-  const { data: { user } } = await supabase.auth.getUser()
+import { useState } from 'react'
+import { useProfile } from '@/hooks/use-profile'
+import { ProfileView, ProfileForm } from '@/components/profile'
+import { Loader2 } from 'lucide-react'
 
-  if (!user) {
-    redirect('/login')
+export default function ProfilePage() {
+  const { data: profile, isLoading, error } = useProfile()
+  const [isEditing, setIsEditing] = useState(false)
+
+  if (isLoading) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <Loader2 className="h-8 w-8 animate-spin text-primary" />
+        <p className="mt-4 text-muted-foreground">読み込み中...</p>
+      </div>
+    )
   }
 
-  const { data: profile } = await supabase
-    .from('profiles')
-    .select('*')
-    .eq('id', user.id)
-    .single()
+  if (error || !profile) {
+    return (
+      <div className="flex flex-col items-center justify-center py-20">
+        <p className="text-destructive">エラーが発生しました</p>
+        <p className="text-sm text-muted-foreground mt-2">
+          {error instanceof Error ? error.message : 'プロフィールを取得できませんでした'}
+        </p>
+      </div>
+    )
+  }
 
   return (
-    <div className="space-y-6">
-      <h1 className="text-2xl font-bold">プロフィール</h1>
-      <div className="rounded-lg border p-4">
-        <p className="font-medium">{profile?.display_name || 'ゲスト'}</p>
-        <p className="text-sm text-muted-foreground">{user.email}</p>
-      </div>
-      <LogoutButton />
+    <div className="py-6">
+      <h1 className="text-xl font-bold mb-6">
+        {isEditing ? 'プロフィール編集' : 'プロフィール'}
+      </h1>
+
+      {isEditing ? (
+        <ProfileForm
+          profile={profile}
+          onCancel={() => setIsEditing(false)}
+          onSuccess={() => setIsEditing(false)}
+        />
+      ) : (
+        <ProfileView profile={profile} onEdit={() => setIsEditing(true)} />
+      )}
     </div>
   )
 }
