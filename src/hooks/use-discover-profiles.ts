@@ -10,15 +10,17 @@ export function useDiscoverProfiles() {
   return useQuery({
     queryKey: ['discover-profiles'],
     queryFn: async (): Promise<Profile[]> => {
-      // 現在のユーザーを取得
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) throw new Error('Not authenticated')
+      const { data: { user }, error: authError } = await supabase.auth.getUser()
+      if (authError) throw new Error('認証エラーが発生しました')
+      if (!user) throw new Error('ログインが必要です')
 
       // 自分がスワイプ済みのユーザーIDを取得
-      const { data: swipedIds } = await supabase
+      const { data: swipedIds, error: swipeError } = await supabase
         .from('swipes')
         .select('swiped_id')
         .eq('swiper_id', user.id)
+
+      if (swipeError) throw new Error('データの取得に失敗しました')
 
       const excludeIds = [
         user.id,
@@ -33,8 +35,10 @@ export function useDiscoverProfiles() {
         .order('created_at', { ascending: false })
         .limit(20)
 
-      if (error) throw error
+      if (error) throw new Error('ユーザー情報の取得に失敗しました')
       return data || []
     },
+    staleTime: 30 * 1000, // 30秒
+    retry: 2,
   })
 }

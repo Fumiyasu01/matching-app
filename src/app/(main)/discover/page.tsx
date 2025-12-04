@@ -1,9 +1,10 @@
 'use client'
 
-import { useState, useRef } from 'react'
+import { useState, useMemo } from 'react'
 import { SwipeCard, MatchModal, SwipeButtons } from '@/components/discover'
 import { useDiscoverProfiles } from '@/hooks/use-discover-profiles'
-import { useSwipe } from '@/hooks/use-swipe'
+import { useSwipe, directionToAction } from '@/hooks/use-swipe'
+import type { SwipeDirection } from '@/hooks/use-swipe'
 import { Loader2, Users } from 'lucide-react'
 import type { Profile } from '@/types/database'
 
@@ -15,13 +16,17 @@ export default function DiscoverPage() {
   const [matchedProfile, setMatchedProfile] = useState<Profile | null>(null)
   const [showMatchModal, setShowMatchModal] = useState(false)
 
-  // カードの参照を保持
-  const cardRefs = useRef<Map<string, any>>(new Map())
-
   const currentProfile = profiles?.[currentIndex]
 
-  const handleSwipe = async (direction: string, profile: Profile) => {
-    const action = direction === 'right' ? 'like' : 'pass'
+  // 表示するカードをメモ化（パフォーマンス最適化）
+  const visibleProfiles = useMemo(() => {
+    if (!profiles) return []
+    // 現在のカードと次のカードのみ表示（スタック順序のため逆順）
+    return profiles.slice(currentIndex, currentIndex + 2).reverse()
+  }, [profiles, currentIndex])
+
+  const handleSwipe = async (direction: SwipeDirection, profile: Profile) => {
+    const action = directionToAction(direction)
 
     try {
       const result = await swipeMutation.mutateAsync({
@@ -42,9 +47,8 @@ export default function DiscoverPage() {
     setCurrentIndex((prev) => prev + 1)
   }
 
-  const handleButtonSwipe = (direction: 'left' | 'right') => {
+  const handleButtonSwipe = (direction: SwipeDirection) => {
     if (!currentProfile) return
-    // プログラムでスワイプをトリガー（react-tinder-card のAPIを使用）
     handleSwipe(direction, currentProfile)
     handleCardLeftScreen()
   }
@@ -63,7 +67,7 @@ export default function DiscoverPage() {
       <div className="flex flex-col items-center justify-center py-20">
         <p className="text-destructive">エラーが発生しました</p>
         <p className="text-sm text-muted-foreground mt-2">
-          {error instanceof Error ? error.message : 'Unknown error'}
+          {error instanceof Error ? error.message : '予期しないエラーが発生しました'}
         </p>
       </div>
     )
@@ -88,17 +92,14 @@ export default function DiscoverPage() {
       <h1 className="text-xl font-bold mb-6">仲間を探す</h1>
 
       <div className="relative w-full max-w-sm h-[500px]">
-        {profiles
-          .slice(currentIndex, currentIndex + 2)
-          .reverse()
-          .map((profile, idx) => (
-            <SwipeCard
-              key={profile.id}
-              profile={profile}
-              onSwipe={(dir) => handleSwipe(dir, profile)}
-              onCardLeftScreen={handleCardLeftScreen}
-            />
-          ))}
+        {visibleProfiles.map((profile) => (
+          <SwipeCard
+            key={profile.id}
+            profile={profile}
+            onSwipe={(dir) => handleSwipe(dir, profile)}
+            onCardLeftScreen={handleCardLeftScreen}
+          />
+        ))}
       </div>
 
       <SwipeButtons
