@@ -2,6 +2,8 @@
 
 import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
+import { ensureAuthenticated } from '@/lib/auth'
+import { queryKeys } from '@/lib/query-keys'
 import type { Profile } from '@/types/database'
 
 export type SwipeDirection = 'left' | 'right'
@@ -24,9 +26,7 @@ export function useSwipe() {
       swipedId: string
       action: SwipeAction
     }): Promise<SwipeResult> => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
       // スワイプを保存
       const { error: swipeError } = await supabase
@@ -39,17 +39,11 @@ export function useSwipe() {
 
       if (swipeError) throw new Error('スワイプの保存に失敗しました')
 
-      // likeの場合、マッチングをチェック（1クエリで取得）
+      // likeの場合、マッチングをチェック
       if (action === 'like') {
-        // matchesテーブルのトリガーでマッチが作成されている可能性をチェック
-        // profilesとjoinして1クエリで取得
-        const { data: matchWithProfile, error: matchError } = await supabase
+        const { data: match, error: matchError } = await supabase
           .from('matches')
-          .select(`
-            id,
-            profiles!matches_user1_id_fkey(id, display_name, avatar_url, bio, skills, location, looking_for),
-            profiles!matches_user2_id_fkey(id, display_name, avatar_url, bio, skills, location, looking_for)
-          `)
+          .select('id')
           .or(`and(user1_id.eq.${user.id},user2_id.eq.${swipedId}),and(user1_id.eq.${swipedId},user2_id.eq.${user.id})`)
           .maybeSingle()
 
@@ -57,17 +51,13 @@ export function useSwipe() {
           console.error('Match check error:', matchError)
         }
 
-        if (matchWithProfile) {
-          // マッチ相手のプロフィールを抽出
-          const profile1 = matchWithProfile.profiles as unknown as Profile | null
-          const profile2 = (matchWithProfile as any).profiles as unknown as Profile | null
-
-          // 相手のプロフィールを特定
-          const matchedProfile = profile1?.id === swipedId
-            ? profile1
-            : profile2?.id === swipedId
-              ? profile2
-              : null
+        if (match) {
+          // マッチした相手のプロフィールを取得
+          const { data: matchedProfile } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', swipedId)
+            .single()
 
           if (matchedProfile) {
             return { matched: true, matchedProfile }
@@ -78,8 +68,8 @@ export function useSwipe() {
       return { matched: false, matchedProfile: null }
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['discover-profiles'] })
-      queryClient.invalidateQueries({ queryKey: ['matches'] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.discoverProfiles })
+      queryClient.invalidateQueries({ queryKey: queryKeys.matches })
     },
   })
 }

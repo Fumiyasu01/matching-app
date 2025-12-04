@@ -5,7 +5,10 @@ import { SwipeCard, MatchModal, SwipeButtons } from '@/components/discover'
 import { useDiscoverProfiles } from '@/hooks/use-discover-profiles'
 import { useSwipe, directionToAction } from '@/hooks/use-swipe'
 import type { SwipeDirection } from '@/hooks/use-swipe'
-import { Loader2, Users } from 'lucide-react'
+import { LoadingState } from '@/components/ui/loading-state'
+import { ErrorState } from '@/components/ui/error-state'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Users } from 'lucide-react'
 import type { Profile } from '@/types/database'
 
 export default function DiscoverPage() {
@@ -18,10 +21,8 @@ export default function DiscoverPage() {
 
   const currentProfile = profiles?.[currentIndex]
 
-  // 表示するカードをメモ化（パフォーマンス最適化）
   const visibleProfiles = useMemo(() => {
     if (!profiles) return []
-    // 現在のカードと次のカードのみ表示（スタック順序のため逆順）
     return profiles.slice(currentIndex, currentIndex + 2).reverse()
   }, [profiles, currentIndex])
 
@@ -54,36 +55,22 @@ export default function DiscoverPage() {
   }
 
   if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="mt-4 text-muted-foreground">読み込み中...</p>
-      </div>
-    )
+    return <LoadingState />
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <p className="text-destructive">エラーが発生しました</p>
-        <p className="text-sm text-muted-foreground mt-2">
-          {error instanceof Error ? error.message : '予期しないエラーが発生しました'}
-        </p>
-      </div>
-    )
+    return <ErrorState error={error instanceof Error ? error : null} />
   }
 
   const hasMoreProfiles = profiles && currentIndex < profiles.length
 
   if (!hasMoreProfiles) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <Users className="h-16 w-16 text-muted-foreground mb-4" />
-        <h2 className="text-xl font-semibold mb-2">すべてチェックしました</h2>
-        <p className="text-muted-foreground text-center max-w-xs">
-          新しいユーザーが登録されるまでお待ちください
-        </p>
-      </div>
+      <EmptyState
+        icon={Users}
+        title="すべてチェックしました"
+        description="新しいユーザーが登録されるまでお待ちください"
+      />
     )
   }
 

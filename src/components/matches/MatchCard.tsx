@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import { Card } from '@/components/ui/card'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { ProfileAvatar } from '@/components/ui/profile-avatar'
 import { Badge } from '@/components/ui/badge'
 import { formatDistanceToNow } from '@/lib/date-utils'
 import type { MatchWithProfile } from '@/hooks/use-matches'
@@ -19,12 +19,11 @@ export function MatchCard({ data }: MatchCardProps) {
       <Card className="p-4 hover:bg-accent transition-colors cursor-pointer">
         <div className="flex items-center gap-4">
           <div className="relative">
-            <Avatar className="h-14 w-14">
-              <AvatarImage src={profile.avatar_url ?? undefined} alt={profile.display_name} />
-              <AvatarFallback className="bg-primary text-primary-foreground">
-                {profile.display_name.charAt(0).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
+            <ProfileAvatar
+              src={profile.avatar_url}
+              name={profile.display_name}
+              size="md"
+            />
             {unreadCount > 0 && (
               <Badge
                 className="absolute -top-1 -right-1 h-5 w-5 p-0 flex items-center justify-center text-xs"

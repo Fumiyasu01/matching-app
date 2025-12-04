@@ -1,7 +1,7 @@
 'use client'
 
 import { Card, CardContent } from '@/components/ui/card'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { ProfileAvatar } from '@/components/ui/profile-avatar'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { MapPin, Briefcase, Pencil } from 'lucide-react'
@@ -20,12 +20,12 @@ export function ProfileView({ profile, onEdit }: ProfileViewProps) {
       <Card>
         <CardContent className="pt-6">
           <div className="flex flex-col items-center">
-            <Avatar className="h-24 w-24 mb-4">
-              <AvatarImage src={profile.avatar_url ?? undefined} alt={profile.display_name} />
-              <AvatarFallback className="text-2xl bg-primary text-primary-foreground">
-                {profile.display_name.charAt(0).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
+            <ProfileAvatar
+              src={profile.avatar_url}
+              name={profile.display_name}
+              size="lg"
+              className="mb-4"
+            />
 
             <h2 className="text-xl font-bold mb-1">{profile.display_name}</h2>
             <p className="text-sm text-muted-foreground mb-3">{profile.email}</p>

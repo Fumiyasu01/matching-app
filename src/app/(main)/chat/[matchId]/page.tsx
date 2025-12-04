@@ -6,30 +6,33 @@ import { useMessages, useSendMessage, useMarkAsRead, useChatPartner } from '@/ho
 import { ChatHeader } from '@/components/chat/ChatHeader'
 import { MessageBubble } from '@/components/chat/MessageBubble'
 import { MessageInput } from '@/components/chat/MessageInput'
-import { Loader2 } from 'lucide-react'
+import { LoadingState } from '@/components/ui/loading-state'
+import { ErrorState } from '@/components/ui/error-state'
 
 export default function ChatPage() {
   const params = useParams()
   const matchId = params.matchId as string
 
   const { data: messages, isLoading: messagesLoading } = useMessages(matchId)
-  const { data: partner, isLoading: partnerLoading } = useChatPartner(matchId)
+  const { data: partner, isLoading: partnerLoading, error: partnerError } = useChatPartner(matchId)
   const sendMessage = useSendMessage(matchId)
-  const markAsRead = useMarkAsRead(matchId)
+  const { mutate: markAsRead } = useMarkAsRead(matchId)
 
   const messagesEndRef = useRef<HTMLDivElement>(null)
+  const hasMarkedAsRead = useRef(false)
 
   // 新しいメッセージが来たらスクロール
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages])
 
-  // 画面を開いたら既読にする
+  // 画面を開いたら既読にする（1回のみ）
   useEffect(() => {
-    if (messages && messages.length > 0) {
-      markAsRead.mutate()
+    if (messages && messages.length > 0 && !hasMarkedAsRead.current) {
+      markAsRead()
+      hasMarkedAsRead.current = true
     }
-  }, [messages?.length])
+  }, [messages, markAsRead])
 
   const handleSend = (content: string) => {
     sendMessage.mutate(content)
@@ -39,17 +42,19 @@ export default function ChatPage() {
 
   if (isLoading) {
     return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="mt-4 text-muted-foreground">読み込み中...</p>
+      <div className="flex flex-col h-full items-center justify-center">
+        <LoadingState />
       </div>
     )
   }
 
-  if (!partner) {
+  if (partnerError || !partner) {
     return (
-      <div className="flex flex-col items-center justify-center h-full">
-        <p className="text-destructive">チャット相手が見つかりません</p>
+      <div className="flex flex-col h-full items-center justify-center">
+        <ErrorState
+          title="チャット相手が見つかりません"
+          error={partnerError instanceof Error ? partnerError : null}
+        />
       </div>
     )
   }

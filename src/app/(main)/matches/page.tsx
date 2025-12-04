@@ -2,40 +2,29 @@
 
 import { useMatches } from '@/hooks/use-matches'
 import { MatchCard } from '@/components/matches/MatchCard'
-import { Loader2, Heart } from 'lucide-react'
+import { LoadingState } from '@/components/ui/loading-state'
+import { ErrorState } from '@/components/ui/error-state'
+import { EmptyState } from '@/components/ui/empty-state'
+import { Heart } from 'lucide-react'
 
 export default function MatchesPage() {
   const { data: matches, isLoading, error } = useMatches()
 
   if (isLoading) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <Loader2 className="h-8 w-8 animate-spin text-primary" />
-        <p className="mt-4 text-muted-foreground">読み込み中...</p>
-      </div>
-    )
+    return <LoadingState />
   }
 
   if (error) {
-    return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <p className="text-destructive">エラーが発生しました</p>
-        <p className="text-sm text-muted-foreground mt-2">
-          {error instanceof Error ? error.message : '予期しないエラーが発生しました'}
-        </p>
-      </div>
-    )
+    return <ErrorState error={error instanceof Error ? error : null} />
   }
 
   if (!matches || matches.length === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-20">
-        <Heart className="h-16 w-16 text-muted-foreground mb-4" />
-        <h2 className="text-xl font-semibold mb-2">まだマッチがありません</h2>
-        <p className="text-muted-foreground text-center max-w-xs">
-          スワイプして気になる人にいいねを送りましょう
-        </p>
-      </div>
+      <EmptyState
+        icon={Heart}
+        title="まだマッチがありません"
+        description="スワイプして気になる人にいいねを送りましょう"
+      />
     )
   }
 

@@ -2,17 +2,17 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
+import { ensureAuthenticated } from '@/lib/auth'
+import { queryKeys } from '@/lib/query-keys'
 import type { Profile } from '@/types/database'
 
 export function useDiscoverProfiles() {
   const supabase = createClient()
 
   return useQuery({
-    queryKey: ['discover-profiles'],
+    queryKey: queryKeys.discoverProfiles,
     queryFn: async (): Promise<Profile[]> => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
       // 自分がスワイプ済みのユーザーIDを取得
       const { data: swipedIds, error: swipeError } = await supabase
@@ -38,7 +38,7 @@ export function useDiscoverProfiles() {
       if (error) throw new Error('ユーザー情報の取得に失敗しました')
       return data || []
     },
-    staleTime: 30 * 1000, // 30秒
+    staleTime: 30 * 1000,
     retry: 2,
   })
 }

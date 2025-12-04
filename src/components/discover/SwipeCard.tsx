@@ -2,7 +2,7 @@
 
 import TinderCard from 'react-tinder-card'
 import { Card, CardContent } from '@/components/ui/card'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
+import { ProfileAvatar } from '@/components/ui/profile-avatar'
 import { Badge } from '@/components/ui/badge'
 import { MapPin, Briefcase } from 'lucide-react'
 import { LOOKING_FOR_LABELS } from '@/lib/constants'
@@ -32,12 +32,12 @@ export function SwipeCard({ profile, onSwipe, onCardLeftScreen }: SwipeCardProps
       <Card className="w-full max-w-sm mx-auto overflow-hidden shadow-xl cursor-grab active:cursor-grabbing">
         <div className="relative h-80 bg-gradient-to-br from-primary/20 to-primary/5">
           <div className="absolute inset-0 flex items-center justify-center">
-            <Avatar className="h-40 w-40 border-4 border-white shadow-lg">
-              <AvatarImage src={profile.avatar_url ?? undefined} alt={profile.display_name} />
-              <AvatarFallback className="text-4xl bg-primary text-primary-foreground">
-                {profile.display_name.charAt(0).toUpperCase()}
-              </AvatarFallback>
-            </Avatar>
+            <ProfileAvatar
+              src={profile.avatar_url}
+              name={profile.display_name}
+              size="xl"
+              className="border-4 border-white shadow-lg"
+            />
           </div>
         </div>
 

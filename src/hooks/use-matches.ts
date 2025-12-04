@@ -2,6 +2,8 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
+import { ensureAuthenticated } from '@/lib/auth'
+import { queryKeys } from '@/lib/query-keys'
 import type { Profile, Match, Message } from '@/types/database'
 
 export interface MatchWithProfile {
@@ -15,11 +17,9 @@ export function useMatches() {
   const supabase = createClient()
 
   return useQuery({
-    queryKey: ['matches'],
+    queryKey: queryKeys.matches,
     queryFn: async (): Promise<MatchWithProfile[]> => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
       // マッチ一覧を取得
       const { data: matches, error: matchError } = await supabase
@@ -94,7 +94,6 @@ export function useMatches() {
         })
         .filter((item): item is MatchWithProfile => item !== null)
         .sort((a, b) => {
-          // 最新メッセージがある方を上に
           const aTime = a.lastMessage?.created_at || a.match.created_at
           const bTime = b.lastMessage?.created_at || b.match.created_at
           return new Date(bTime).getTime() - new Date(aTime).getTime()

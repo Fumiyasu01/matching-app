@@ -1,8 +1,10 @@
 'use client'
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { useEffect } from 'react'
+import { useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { ensureAuthenticated, getCurrentUser } from '@/lib/auth'
+import { queryKeys } from '@/lib/query-keys'
 import type { Message, Profile } from '@/types/database'
 
 export interface ChatMessage extends Message {
@@ -14,11 +16,9 @@ export function useMessages(matchId: string) {
   const queryClient = useQueryClient()
 
   const query = useQuery({
-    queryKey: ['messages', matchId],
+    queryKey: queryKeys.messages(matchId),
     queryFn: async (): Promise<ChatMessage[]> => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
       const { data, error } = await supabase
         .from('messages')
@@ -48,9 +48,9 @@ export function useMessages(matchId: string) {
           table: 'messages',
           filter: `match_id=eq.${matchId}`,
         },
-        (payload) => {
-          queryClient.invalidateQueries({ queryKey: ['messages', matchId] })
-          queryClient.invalidateQueries({ queryKey: ['matches'] })
+        () => {
+          queryClient.invalidateQueries({ queryKey: queryKeys.messages(matchId) })
+          queryClient.invalidateQueries({ queryKey: queryKeys.matches })
         }
       )
       .subscribe()
@@ -69,9 +69,7 @@ export function useSendMessage(matchId: string) {
 
   return useMutation({
     mutationFn: async (content: string) => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
       const { error } = await supabase
         .from('messages')
@@ -84,8 +82,8 @@ export function useSendMessage(matchId: string) {
       if (error) throw new Error('メッセージの送信に失敗しました')
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['messages', matchId] })
-      queryClient.invalidateQueries({ queryKey: ['matches'] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.messages(matchId) })
+      queryClient.invalidateQueries({ queryKey: queryKeys.matches })
     },
   })
 }
@@ -94,35 +92,31 @@ export function useMarkAsRead(matchId: string) {
   const supabase = createClient()
   const queryClient = useQueryClient()
 
-  return useMutation({
-    mutationFn: async () => {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
+  const mutate = useCallback(async () => {
+    const user = await getCurrentUser()
+    if (!user) return
 
-      await supabase
-        .from('messages')
-        .update({ read_at: new Date().toISOString() })
-        .eq('match_id', matchId)
-        .neq('sender_id', user.id)
-        .is('read_at', null)
-    },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['matches'] })
-    },
-  })
+    await supabase
+      .from('messages')
+      .update({ read_at: new Date().toISOString() })
+      .eq('match_id', matchId)
+      .neq('sender_id', user.id)
+      .is('read_at', null)
+
+    queryClient.invalidateQueries({ queryKey: queryKeys.matches })
+  }, [matchId, supabase, queryClient])
+
+  return { mutate }
 }
 
 export function useChatPartner(matchId: string) {
   const supabase = createClient()
 
   return useQuery({
-    queryKey: ['chat-partner', matchId],
+    queryKey: queryKeys.chatPartner(matchId),
     queryFn: async (): Promise<Profile> => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
-      // マッチを取得
       const { data: match, error: matchError } = await supabase
         .from('matches')
         .select('*')
@@ -131,10 +125,8 @@ export function useChatPartner(matchId: string) {
 
       if (matchError || !match) throw new Error('マッチが見つかりません')
 
-      // 相手のIDを特定
       const partnerId = match.user1_id === user.id ? match.user2_id : match.user1_id
 
-      // プロフィールを取得
       const { data: profile, error: profileError } = await supabase
         .from('profiles')
         .select('*')

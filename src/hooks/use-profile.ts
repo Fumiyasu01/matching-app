@@ -2,17 +2,17 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
+import { ensureAuthenticated } from '@/lib/auth'
+import { queryKeys } from '@/lib/query-keys'
 import type { Profile, ProfileUpdate } from '@/types/database'
 
 export function useProfile() {
   const supabase = createClient()
 
   return useQuery({
-    queryKey: ['profile'],
+    queryKey: queryKeys.profile,
     queryFn: async (): Promise<Profile> => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
       const { data, error } = await supabase
         .from('profiles')
@@ -25,7 +25,7 @@ export function useProfile() {
 
       return data
     },
-    staleTime: 60 * 1000, // 1分
+    staleTime: 60 * 1000,
   })
 }
 
@@ -35,9 +35,7 @@ export function useUpdateProfile() {
 
   return useMutation({
     mutationFn: async (updates: ProfileUpdate) => {
-      const { data: { user }, error: authError } = await supabase.auth.getUser()
-      if (authError) throw new Error('認証エラーが発生しました')
-      if (!user) throw new Error('ログインが必要です')
+      const user = await ensureAuthenticated()
 
       const { error } = await supabase
         .from('profiles')
@@ -47,7 +45,7 @@ export function useUpdateProfile() {
       if (error) throw new Error('プロフィールの更新に失敗しました')
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profile'] })
+      queryClient.invalidateQueries({ queryKey: queryKeys.profile })
     },
   })
 }
