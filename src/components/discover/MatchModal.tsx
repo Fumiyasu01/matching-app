@@ -1,6 +1,6 @@
 'use client'
 
-import { Dialog, DialogContent } from '@/components/ui/dialog'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Heart, MessageCircle, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
 import type { Profile } from '@/types/database'
@@ -45,6 +45,7 @@ export function MatchModal({ open, onClose, matchedProfile, currentUserProfile }
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="sm:max-w-sm border-0 bg-gradient-to-b from-cyan-50 to-white p-0 overflow-hidden">
+        <DialogTitle className="sr-only">マッチしました</DialogTitle>
         {/* Close Button */}
         <button
           onClick={onClose}

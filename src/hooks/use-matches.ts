@@ -4,6 +4,8 @@ import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { ensureAuthenticated } from '@/lib/auth'
 import { queryKeys } from '@/lib/query-keys'
+import { mockStore, mockProfiles } from '@/lib/mock-data'
+import { USE_MOCK_DATA } from '@/lib/config'
 import type { Profile, Match, Message } from '@/types/database'
 
 export interface MatchWithProfile {
@@ -19,6 +21,28 @@ export function useMatches() {
   return useQuery({
     queryKey: queryKeys.matches,
     queryFn: async (): Promise<MatchWithProfile[]> => {
+      // Use mock data if enabled
+      if (USE_MOCK_DATA) {
+        const matches = mockStore.getMatches()
+        return matches.map(match => {
+          const profile = mockProfiles.find(p => p.id === match.user2_id)!
+          const messages = mockStore.getMessages(match.id)
+          const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+          const unreadCount = messages.filter(m => m.sender_id !== 'current-user' && !m.read_at).length
+
+          return {
+            match,
+            profile,
+            lastMessage,
+            unreadCount,
+          }
+        }).sort((a, b) => {
+          const aTime = a.lastMessage?.created_at || a.match.created_at
+          const bTime = b.lastMessage?.created_at || b.match.created_at
+          return new Date(bTime).getTime() - new Date(aTime).getTime()
+        })
+      }
+
       const user = await ensureAuthenticated()
 
       // マッチ一覧を取得

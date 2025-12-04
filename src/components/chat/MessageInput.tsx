@@ -11,20 +11,46 @@ interface MessageInputProps {
 
 export function MessageInput({ onSend, disabled }: MessageInputProps) {
   const [message, setMessage] = useState('')
+  const [isMobile, setIsMobile] = useState(false)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
-  const handleSubmit = (e: React.FormEvent) => {
-    e.preventDefault()
+  // モバイル判定
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(
+        /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(
+          navigator.userAgent
+        ) || window.innerWidth < 768
+      )
+    }
+    checkMobile()
+    window.addEventListener('resize', checkMobile)
+    return () => window.removeEventListener('resize', checkMobile)
+  }, [])
+
+  const handleSubmit = (e?: React.FormEvent) => {
+    e?.preventDefault()
     const trimmed = message.trim()
     if (!trimmed) return
     onSend(trimmed)
     setMessage('')
   }
 
-  const handleKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // モバイルの場合はEnterで改行のみ（送信ボタンで送信）
+    if (isMobile) return
+
+    // PCの場合
+    if (e.key === 'Enter') {
+      // IME変換中は何もしない（日本語確定用）
+      if (e.nativeEvent.isComposing) return
+
+      // Shift+Enterは改行
+      if (e.shiftKey) return
+
+      // Enterのみで送信
       e.preventDefault()
-      handleSubmit(e)
+      handleSubmit()
     }
   }
 

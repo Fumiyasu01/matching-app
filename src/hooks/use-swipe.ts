@@ -4,6 +4,8 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { ensureAuthenticated } from '@/lib/auth'
 import { queryKeys } from '@/lib/query-keys'
+import { mockStore, mockProfiles, shouldMatch } from '@/lib/mock-data'
+import { USE_MOCK_DATA } from '@/lib/config'
 import type { Profile } from '@/types/database'
 
 export type SwipeDirection = 'left' | 'right'
@@ -26,6 +28,21 @@ export function useSwipe() {
       swipedId: string
       action: SwipeAction
     }): Promise<SwipeResult> => {
+      // Use mock data if enabled
+      if (USE_MOCK_DATA) {
+        mockStore.addSwipe(swipedId)
+
+        if (action === 'like' && shouldMatch()) {
+          mockStore.createMatch(swipedId)
+          const matchedProfile = mockProfiles.find(p => p.id === swipedId)
+          if (matchedProfile) {
+            return { matched: true, matchedProfile }
+          }
+        }
+
+        return { matched: false, matchedProfile: null }
+      }
+
       const user = await ensureAuthenticated()
 
       // スワイプを保存
