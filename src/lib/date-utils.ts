@@ -25,3 +25,30 @@ export function formatMessageTime(dateString: string): string {
     minute: '2-digit',
   })
 }
+
+export function formatDateDivider(dateString: string): string {
+  const date = new Date(dateString)
+  const today = new Date()
+  const yesterday = new Date(today)
+  yesterday.setDate(yesterday.getDate() - 1)
+
+  // Reset time to midnight for accurate date comparison
+  const dateOnly = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+  const todayOnly = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const yesterdayOnly = new Date(yesterday.getFullYear(), yesterday.getMonth(), yesterday.getDate())
+
+  if (dateOnly.getTime() === todayOnly.getTime()) {
+    return '今日'
+  }
+
+  if (dateOnly.getTime() === yesterdayOnly.getTime()) {
+    return '昨日'
+  }
+
+  // For older dates, show formatted date
+  return date.toLocaleDateString('ja-JP', {
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+  })
+}

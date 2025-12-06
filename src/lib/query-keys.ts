@@ -14,4 +14,11 @@ export const queryKeys = {
 
   // Current user
   currentUser: ['current-user'] as const,
+
+  // Availability slots
+  availabilitySlots: ['availability-slots'] as const,
+
+  // Settings
+  settings: ['settings'] as const,
+  blockedUsers: ['blocked-users'] as const,
 } as const

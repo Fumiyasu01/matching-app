@@ -4,17 +4,12 @@ import { useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { ensureAuthenticated } from '@/lib/auth'
 import { queryKeys } from '@/lib/query-keys'
-import { mockStore, mockProfiles, shouldMatch } from '@/lib/mock-data'
-import { USE_MOCK_DATA } from '@/lib/config'
-import type { Profile } from '@/types/database'
+import { mockStore, type SwipeResult } from '@/lib/mock-data'
+import { withDataSource } from '@/lib/data-source'
+import { invalidateAfterSwipe } from '@/lib/query-invalidation'
 
 export type SwipeDirection = 'left' | 'right'
 export type SwipeAction = 'like' | 'pass'
-
-interface SwipeResult {
-  matched: boolean
-  matchedProfile: Profile | null
-}
 
 export function useSwipe() {
   const supabase = createClient()
@@ -27,66 +22,54 @@ export function useSwipe() {
     }: {
       swipedId: string
       action: SwipeAction
-    }): Promise<SwipeResult> => {
-      // Use mock data if enabled
-      if (USE_MOCK_DATA) {
-        mockStore.addSwipe(swipedId)
+    }): Promise<SwipeResult> =>
+      withDataSource(
+        () => mockStore.performSwipe(swipedId, action),
+        async () => {
+          const user = await ensureAuthenticated()
 
-        if (action === 'like' && shouldMatch()) {
-          mockStore.createMatch(swipedId)
-          const matchedProfile = mockProfiles.find(p => p.id === swipedId)
-          if (matchedProfile) {
-            return { matched: true, matchedProfile }
+          // スワイプを保存
+          const { error: swipeError } = await supabase
+            .from('swipes')
+            .insert({
+              swiper_id: user.id,
+              swiped_id: swipedId,
+              action,
+            })
+
+          if (swipeError) throw new Error('スワイプの保存に失敗しました')
+
+          // likeの場合、マッチングをチェック
+          if (action === 'like') {
+            const { data: match, error: matchError } = await supabase
+              .from('matches')
+              .select('id')
+              .or(`and(user1_id.eq.${user.id},user2_id.eq.${swipedId}),and(user1_id.eq.${swipedId},user2_id.eq.${user.id})`)
+              .maybeSingle()
+
+            if (matchError) {
+              console.error('Match check error:', matchError)
+            }
+
+            if (match) {
+              // マッチした相手のプロフィールを取得
+              const { data: matchedProfile } = await supabase
+                .from('profiles')
+                .select('*')
+                .eq('id', swipedId)
+                .single()
+
+              if (matchedProfile) {
+                return { matched: true, matchedProfile }
+              }
+            }
           }
+
+          return { matched: false, matchedProfile: null }
         }
-
-        return { matched: false, matchedProfile: null }
-      }
-
-      const user = await ensureAuthenticated()
-
-      // スワイプを保存
-      const { error: swipeError } = await supabase
-        .from('swipes')
-        .insert({
-          swiper_id: user.id,
-          swiped_id: swipedId,
-          action,
-        })
-
-      if (swipeError) throw new Error('スワイプの保存に失敗しました')
-
-      // likeの場合、マッチングをチェック
-      if (action === 'like') {
-        const { data: match, error: matchError } = await supabase
-          .from('matches')
-          .select('id')
-          .or(`and(user1_id.eq.${user.id},user2_id.eq.${swipedId}),and(user1_id.eq.${swipedId},user2_id.eq.${user.id})`)
-          .maybeSingle()
-
-        if (matchError) {
-          console.error('Match check error:', matchError)
-        }
-
-        if (match) {
-          // マッチした相手のプロフィールを取得
-          const { data: matchedProfile } = await supabase
-            .from('profiles')
-            .select('*')
-            .eq('id', swipedId)
-            .single()
-
-          if (matchedProfile) {
-            return { matched: true, matchedProfile }
-          }
-        }
-      }
-
-      return { matched: false, matchedProfile: null }
-    },
+      ),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.discoverProfiles })
-      queryClient.invalidateQueries({ queryKey: queryKeys.matches })
+      invalidateAfterSwipe(queryClient)
     },
   })
 }

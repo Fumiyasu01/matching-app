@@ -1,11 +1,31 @@
 import { config } from '@/lib/config'
-import type { Profile, Match, Message } from '@/types/database'
+import type { Profile, Match, Message, AvailabilitySlot } from '@/types/database'
+import type { ReportReason, Report } from '@/types/moderation'
+import { calculateDistance } from '@/hooks/use-geolocation'
+
+// Types for hook return values (defined here to avoid circular dependencies)
+export interface MatchWithProfile {
+  match: Match
+  profile: Profile
+  lastMessage: Message | null
+  unreadCount: number
+}
+
+export interface SwipeResult {
+  matched: boolean
+  matchedProfile: Profile | null
+}
 
 // Mock state management (in-memory for demo)
 class MockStore {
   private swipedIds: Set<string> = new Set()
   private matches: Map<string, Match> = new Map()
   private messages: Map<string, Message[]> = new Map()
+  private userAvailabilitySlots: AvailabilitySlot[] = []
+  private blockedUsers: Set<string> = new Set()
+  private reports: Report[] = []
+  private typingStatus: Map<string, boolean> = new Map()
+  private typingTimeouts: Map<string, NodeJS.Timeout> = new Map()
 
   // Mark a profile as swiped
   addSwipe(profileId: string) {
@@ -17,9 +37,45 @@ class MockStore {
     return this.swipedIds.has(profileId)
   }
 
-  // Get un-swiped profiles
-  getUnswipedProfiles(): Profile[] {
-    return mockProfiles.filter(p => !this.swipedIds.has(p.id))
+  // Get un-swiped profiles with optional filters
+  getUnswipedProfiles(filters?: {
+    lookingFor?: ('work' | 'volunteer' | 'both')[]
+    skills?: string[]
+    maxDistance?: number | null
+    userLocation?: { latitude: number; longitude: number } | null
+  }): Profile[] {
+    let profiles = mockProfiles.filter(p => !this.swipedIds.has(p.id) && !this.blockedUsers.has(p.id))
+
+    // Apply filters if provided
+    if (filters) {
+      // Filter by looking_for
+      if (filters.lookingFor && filters.lookingFor.length > 0) {
+        profiles = profiles.filter(p => filters.lookingFor!.includes(p.looking_for))
+      }
+
+      // Filter by skills (match if profile has ANY of the selected skills)
+      if (filters.skills && filters.skills.length > 0) {
+        profiles = profiles.filter(p =>
+          p.skills.some(skill => filters.skills!.includes(skill))
+        )
+      }
+
+      // Filter by distance (if user location and maxDistance are provided)
+      if (filters.maxDistance && filters.userLocation) {
+        profiles = profiles.filter(p => {
+          if (!p.latitude || !p.longitude) return false
+          const distance = calculateDistance(
+            filters.userLocation!.latitude,
+            filters.userLocation!.longitude,
+            p.latitude,
+            p.longitude
+          )
+          return distance <= filters.maxDistance!
+        })
+      }
+    }
+
+    return profiles
   }
 
   // Create a match
@@ -55,7 +111,7 @@ class MockStore {
   addMessage(matchId: string, content: string, senderId: string): Message {
     const messages = this.messages.get(matchId) || []
     const message: Message = {
-      id: `msg-${Date.now()}`,
+      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
       match_id: matchId,
       sender_id: senderId,
       content,
@@ -65,9 +121,18 @@ class MockStore {
     messages.push(message)
     this.messages.set(matchId, messages)
 
-    // Auto-reply after 1.5 seconds (for demo)
+    // Auto-reply with typing indicator (for demo)
     if (senderId === 'current-user') {
+      // Show typing indicator after 800ms
       setTimeout(() => {
+        this.setTyping(matchId, true)
+      }, 800)
+
+      // Send auto-reply after 2-4 seconds
+      const replyDelay = 2000 + Math.random() * 2000
+      setTimeout(() => {
+        this.setTyping(matchId, false)
+
         const match = this.matches.get(matchId)
         if (match) {
           const profile = mockProfiles.find(p => p.id === match.user2_id)
@@ -86,7 +151,7 @@ class MockStore {
             this.addMessage(matchId, reply, match.user2_id)
           }
         }
-      }, 1500)
+      }, replyDelay)
     }
 
     return message
@@ -102,11 +167,151 @@ class MockStore {
     })
   }
 
+  // Get user's availability slots
+  getUserAvailabilitySlots(): AvailabilitySlot[] {
+    return this.userAvailabilitySlots
+  }
+
+  // Add availability slot
+  addAvailabilitySlot(slot: Omit<AvailabilitySlot, 'id' | 'user_id' | 'created_at'>): AvailabilitySlot {
+    const newSlot: AvailabilitySlot = {
+      ...slot,
+      id: `slot-user-${Date.now()}`,
+      user_id: 'current-user',
+      created_at: new Date().toISOString(),
+    }
+    this.userAvailabilitySlots.push(newSlot)
+    return newSlot
+  }
+
+  // Update availability slot
+  updateAvailabilitySlot(id: string, updates: Partial<AvailabilitySlot>): AvailabilitySlot | null {
+    const index = this.userAvailabilitySlots.findIndex(s => s.id === id)
+    if (index === -1) return null
+    this.userAvailabilitySlots[index] = { ...this.userAvailabilitySlots[index], ...updates }
+    return this.userAvailabilitySlots[index]
+  }
+
+  // Delete availability slot
+  deleteAvailabilitySlot(id: string): boolean {
+    const index = this.userAvailabilitySlots.findIndex(s => s.id === id)
+    if (index === -1) return false
+    this.userAvailabilitySlots.splice(index, 1)
+    return true
+  }
+
+  // Get matches with full profile data (for useMatches hook)
+  getMatchesWithProfiles(): MatchWithProfile[] {
+    const matches = this.getMatches()
+    return matches.map(match => {
+      const profile = mockProfiles.find(p => p.id === match.user2_id)!
+      const messages = this.getMessages(match.id)
+      const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
+      const unreadCount = messages.filter(m => m.sender_id !== 'current-user' && !m.read_at).length
+
+      return { match, profile, lastMessage, unreadCount }
+    }).sort((a, b) => {
+      const aTime = a.lastMessage?.created_at || a.match.created_at
+      const bTime = b.lastMessage?.created_at || b.match.created_at
+      return new Date(bTime).getTime() - new Date(aTime).getTime()
+    })
+  }
+
+  // Perform swipe and check for match (for useSwipe hook)
+  performSwipe(profileId: string, action: 'like' | 'pass'): SwipeResult {
+    this.addSwipe(profileId)
+
+    if (action === 'like' && shouldMatch()) {
+      this.createMatch(profileId)
+      const matchedProfile = mockProfiles.find(p => p.id === profileId)
+      if (matchedProfile) {
+        return { matched: true, matchedProfile }
+      }
+    }
+
+    return { matched: false, matchedProfile: null }
+  }
+
+  // Block user
+  blockUser(userId: string) {
+    this.blockedUsers.add(userId)
+  }
+
+  // Unblock user
+  unblockUser(userId: string) {
+    this.blockedUsers.delete(userId)
+  }
+
+  // Check if user is blocked
+  isBlocked(userId: string): boolean {
+    return this.blockedUsers.has(userId)
+  }
+
+  // Get blocked users
+  getBlockedUsers(): string[] {
+    return Array.from(this.blockedUsers)
+  }
+
+  // Report user
+  reportUser(userId: string, reason: ReportReason, description?: string): Report {
+    const report: Report = {
+      id: `report-${Date.now()}`,
+      reporter_id: 'current-user',
+      reported_user_id: userId,
+      reason,
+      description,
+      created_at: new Date().toISOString(),
+    }
+    this.reports.push(report)
+    return report
+  }
+
+  // Set typing status for a match
+  setTyping(matchId: string, isTyping: boolean) {
+    this.typingStatus.set(matchId, isTyping)
+
+    // Clear existing timeout if any
+    const existingTimeout = this.typingTimeouts.get(matchId)
+    if (existingTimeout) {
+      clearTimeout(existingTimeout)
+    }
+
+    // Auto-clear typing status after 5 seconds
+    if (isTyping) {
+      const timeout = setTimeout(() => {
+        this.typingStatus.set(matchId, false)
+        this.typingTimeouts.delete(matchId)
+      }, 5000)
+      this.typingTimeouts.set(matchId, timeout)
+    }
+  }
+
+  // Check if partner is typing
+  isTyping(matchId: string): boolean {
+    return this.typingStatus.get(matchId) || false
+  }
+
+  // Mark own messages as read (simulate partner reading)
+  markOwnMessagesAsRead(matchId: string) {
+    const messages = this.messages.get(matchId) || []
+    messages.forEach(msg => {
+      if (msg.sender_id === 'current-user' && !msg.read_at) {
+        msg.read_at = new Date().toISOString()
+      }
+    })
+  }
+
   // Reset store (for testing)
   reset() {
     this.swipedIds.clear()
     this.matches.clear()
     this.messages.clear()
+    this.userAvailabilitySlots = []
+    this.blockedUsers.clear()
+    this.reports = []
+    this.typingStatus.clear()
+    this.typingTimeouts.forEach(timeout => clearTimeout(timeout))
+    this.typingTimeouts.clear()
   }
 }
 
@@ -129,6 +334,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['Figma', 'UI/UX', 'Adobe XD', 'Sketch', 'Prototyping'],
     interests: ['デザイン', 'カフェ巡り', '映画鑑賞'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -142,6 +350,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['React', 'TypeScript', 'Node.js', 'PostgreSQL', 'AWS'],
     interests: ['プログラミング', 'バスケ', 'ゲーム'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -155,6 +366,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['マーケティング', 'データ分析', 'Python', 'SQL', 'Google Analytics'],
     interests: ['旅行', 'ヨガ', '読書'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -168,6 +382,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'volunteer',
     skills: ['プロダクトマネジメント', 'Scrum', 'JIRA', 'ユーザーインタビュー'],
     interests: ['アジャイル', 'キャンプ', '料理'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -181,6 +398,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['Swift', 'SwiftUI', 'iOS', 'Firebase', 'Core Data'],
     interests: ['アプリ開発', '猫', 'カメラ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -194,6 +414,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['Go', 'Kubernetes', 'Docker', 'gRPC', 'MySQL'],
     interests: ['技術ブログ', 'ランニング', 'サウナ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -207,6 +430,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['イラスト', 'Photoshop', 'Illustrator', 'Procreate', 'ブランディング'],
     interests: ['アート', '神社巡り', '抹茶'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -220,6 +446,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'volunteer',
     skills: ['Python', 'TensorFlow', 'PyTorch', 'scikit-learn', 'BigQuery'],
     interests: ['機械学習', 'Kaggle', '将棋'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -233,6 +462,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['SEO', 'コンテンツ制作', 'SNSマーケ', 'WordPress', 'ライティング'],
     interests: ['ブログ', 'カフェ', '韓国ドラマ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -246,6 +478,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['Vue.js', 'Nuxt.js', 'TypeScript', 'Tailwind CSS', 'Vite'],
     interests: ['OSS貢献', 'スノーボード', 'クラフトビール'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -259,6 +494,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['UXリサーチ', 'ユーザビリティテスト', 'Figma', 'Miro', 'インタビュー'],
     interests: ['心理学', 'ボードゲーム', 'ワイン'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -272,6 +510,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['AWS', 'GCP', 'Terraform', 'Ansible', 'Linux'],
     interests: ['クラウド技術', '登山', 'コーヒー焙煎'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -285,6 +526,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['ディレクション', 'プロジェクト管理', 'Notion', 'Slack', 'ワイヤーフレーム'],
     interests: ['美術館巡り', 'ピラティス', 'インテリア'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -298,6 +542,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'volunteer',
     skills: ['セキュリティ診断', 'Python', 'Burp Suite', 'OWASP', 'ネットワーク'],
     interests: ['CTF', 'ハッキング', 'SF小説'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -311,6 +558,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['Kotlin', 'Android', 'Jetpack Compose', 'Firebase', 'Coroutines'],
     interests: ['モバイル開発', 'ダンス', 'スイーツ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -324,6 +574,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['技術戦略', 'チームビルディング', '採用', 'アーキテクチャ設計', 'React'],
     interests: ['スタートアップ', '投資', 'ゴルフ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -337,6 +590,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['動画編集', 'Premiere Pro', 'After Effects', 'YouTube', 'TikTok'],
     interests: ['映像制作', 'Vlog', '音楽フェス'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -350,6 +606,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'volunteer',
     skills: ['CI/CD', 'GitHub Actions', 'ArgoCD', 'Jenkins', 'Docker'],
     interests: ['自動化', 'DIY', 'キャンプ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -363,6 +622,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['人事システム', 'Ruby on Rails', 'データ分析', '組織開発', 'コーチング'],
     interests: ['HR Tech', 'キャリア支援', 'ランニング'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -376,6 +638,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['Unity', 'C#', 'ゲームデザイン', '3Dモデリング', 'Blender'],
     interests: ['ゲーム開発', 'eスポーツ', 'アニメ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -389,6 +654,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['テクニカルライティング', 'API文書', 'Markdown', '翻訳', 'Git'],
     interests: ['ドキュメンテーション', '語学学習', '紅茶'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -402,6 +670,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['Solidity', 'Ethereum', 'Web3.js', 'DeFi', 'NFT'],
     interests: ['暗号資産', 'Web3', '分散システム'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -415,6 +686,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'volunteer',
     skills: ['アクセシビリティ', 'WCAG', 'スクリーンリーダー', 'HTML', 'WAI-ARIA'],
     interests: ['インクルーシブデザイン', '手話', '茶道'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -428,6 +702,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['テスト自動化', 'Selenium', 'Cypress', 'Jest', 'テスト設計'],
     interests: ['品質管理', 'ボルダリング', 'クラフトビール'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -441,6 +718,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['Blender', '3Dモデリング', 'アニメーション', 'VTuber', 'Substance'],
     interests: ['3DCG', 'VR', 'コスプレ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -454,6 +734,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['MLOps', 'MLflow', 'Kubeflow', 'Python', 'Kubernetes'],
     interests: ['機械学習', 'データエンジニアリング', 'サッカー'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -467,6 +750,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['カスタマーサクセス', 'オンボーディング', 'データ分析', 'SQL', 'Zapier'],
     interests: ['SaaS', 'UX改善', 'ヨガ'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -480,6 +766,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'volunteer',
     skills: ['LLM', 'ChatGPT API', 'Python', 'Next.js', 'プロンプトエンジニアリング'],
     interests: ['生成AI', '自然言語処理', '読書'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -493,6 +782,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'work',
     skills: ['Figma', 'React', 'Storybook', 'デザインシステム', 'CSS-in-JS'],
     interests: ['デザインエンジニアリング', 'UIアニメーション', 'フェス'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },
@@ -506,6 +798,9 @@ export const mockProfiles: Profile[] = [
     looking_for: 'both',
     skills: ['エンジニアリングマネジメント', '1on1', 'OKR', 'チームビルディング', 'アジャイル'],
     interests: ['組織論', 'コーチング', 'トレイルラン'],
+    latitude: null,
+    longitude: null,
+    location_updated_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   },

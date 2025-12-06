@@ -4,125 +4,102 @@ import { useQuery } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { ensureAuthenticated } from '@/lib/auth'
 import { queryKeys } from '@/lib/query-keys'
-import { mockStore, mockProfiles } from '@/lib/mock-data'
-import { USE_MOCK_DATA } from '@/lib/config'
-import type { Profile, Match, Message } from '@/types/database'
+import { mockStore, type MatchWithProfile } from '@/lib/mock-data'
+import { withDataSource } from '@/lib/data-source'
+import type { Match, Message } from '@/types/database'
 
-export interface MatchWithProfile {
-  match: Match
-  profile: Profile
-  lastMessage: Message | null
-  unreadCount: number
-}
+export type { MatchWithProfile }
 
 export function useMatches() {
   const supabase = createClient()
 
   return useQuery({
     queryKey: queryKeys.matches,
-    queryFn: async (): Promise<MatchWithProfile[]> => {
-      // Use mock data if enabled
-      if (USE_MOCK_DATA) {
-        const matches = mockStore.getMatches()
-        return matches.map(match => {
-          const profile = mockProfiles.find(p => p.id === match.user2_id)!
-          const messages = mockStore.getMessages(match.id)
-          const lastMessage = messages.length > 0 ? messages[messages.length - 1] : null
-          const unreadCount = messages.filter(m => m.sender_id !== 'current-user' && !m.read_at).length
+    queryFn: async (): Promise<MatchWithProfile[]> =>
+      withDataSource(
+        () => mockStore.getMatchesWithProfiles(),
+        async () => {
+          const user = await ensureAuthenticated()
 
-          return {
-            match,
-            profile,
-            lastMessage,
-            unreadCount,
-          }
-        }).sort((a, b) => {
-          const aTime = a.lastMessage?.created_at || a.match.created_at
-          const bTime = b.lastMessage?.created_at || b.match.created_at
-          return new Date(bTime).getTime() - new Date(aTime).getTime()
-        })
-      }
+          // マッチ一覧を取得
+          const { data: matches, error: matchError } = await supabase
+            .from('matches')
+            .select('*')
+            .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
+            .order('created_at', { ascending: false })
 
-      const user = await ensureAuthenticated()
+          if (matchError) throw new Error('マッチ一覧の取得に失敗しました')
+          if (!matches || matches.length === 0) return []
 
-      // マッチ一覧を取得
-      const { data: matches, error: matchError } = await supabase
-        .from('matches')
-        .select('*')
-        .or(`user1_id.eq.${user.id},user2_id.eq.${user.id}`)
-        .order('created_at', { ascending: false })
+          // 相手のプロフィールIDを取得
+          const partnerIds = matches.map(m =>
+            m.user1_id === user.id ? m.user2_id : m.user1_id
+          )
 
-      if (matchError) throw new Error('マッチ一覧の取得に失敗しました')
-      if (!matches || matches.length === 0) return []
+          // プロフィールを取得
+          const { data: profiles, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .in('id', partnerIds)
 
-      // 相手のプロフィールIDを取得
-      const partnerIds = matches.map(m =>
-        m.user1_id === user.id ? m.user2_id : m.user1_id
-      )
+          if (profileError) throw new Error('プロフィールの取得に失敗しました')
 
-      // プロフィールを取得
-      const { data: profiles, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .in('id', partnerIds)
+          // 各マッチの最新メッセージを取得
+          const matchIds = matches.map(m => m.id)
+          const { data: messages } = await supabase
+            .from('messages')
+            .select('*')
+            .in('match_id', matchIds)
+            .order('created_at', { ascending: false })
 
-      if (profileError) throw new Error('プロフィールの取得に失敗しました')
+          // 未読メッセージ数を取得
+          const { data: unreadMessages } = await supabase
+            .from('messages')
+            .select('match_id')
+            .in('match_id', matchIds)
+            .neq('sender_id', user.id)
+            .is('read_at', null)
 
-      // 各マッチの最新メッセージを取得
-      const matchIds = matches.map(m => m.id)
-      const { data: messages } = await supabase
-        .from('messages')
-        .select('*')
-        .in('match_id', matchIds)
-        .order('created_at', { ascending: false })
+          // マッチごとの最新メッセージと未読数をマップ
+          const lastMessageMap = new Map<string, Message>()
+          const unreadCountMap = new Map<string, number>()
 
-      // 未読メッセージ数を取得
-      const { data: unreadMessages } = await supabase
-        .from('messages')
-        .select('match_id')
-        .in('match_id', matchIds)
-        .neq('sender_id', user.id)
-        .is('read_at', null)
+          messages?.forEach(msg => {
+            if (!lastMessageMap.has(msg.match_id)) {
+              lastMessageMap.set(msg.match_id, msg)
+            }
+          })
 
-      // マッチごとの最新メッセージと未読数をマップ
-      const lastMessageMap = new Map<string, Message>()
-      const unreadCountMap = new Map<string, number>()
+          unreadMessages?.forEach(msg => {
+            const count = unreadCountMap.get(msg.match_id) || 0
+            unreadCountMap.set(msg.match_id, count + 1)
+          })
 
-      messages?.forEach(msg => {
-        if (!lastMessageMap.has(msg.match_id)) {
-          lastMessageMap.set(msg.match_id, msg)
+          // プロフィールをマップ化
+          const profileMap = new Map(profiles?.map(p => [p.id, p]) || [])
+
+          // 結果を組み立て
+          return matches
+            .map(match => {
+              const partnerId = match.user1_id === user.id ? match.user2_id : match.user1_id
+              const profile = profileMap.get(partnerId)
+              if (!profile) return null
+
+              return {
+                match,
+                profile,
+                lastMessage: lastMessageMap.get(match.id) || null,
+                unreadCount: unreadCountMap.get(match.id) || 0,
+              }
+            })
+            .filter((item): item is MatchWithProfile => item !== null)
+            .sort((a, b) => {
+              const aTime = a.lastMessage?.created_at || a.match.created_at
+              const bTime = b.lastMessage?.created_at || b.match.created_at
+              return new Date(bTime).getTime() - new Date(aTime).getTime()
+            })
         }
-      })
-
-      unreadMessages?.forEach(msg => {
-        const count = unreadCountMap.get(msg.match_id) || 0
-        unreadCountMap.set(msg.match_id, count + 1)
-      })
-
-      // プロフィールをマップ化
-      const profileMap = new Map(profiles?.map(p => [p.id, p]) || [])
-
-      // 結果を組み立て
-      return matches
-        .map(match => {
-          const partnerId = match.user1_id === user.id ? match.user2_id : match.user1_id
-          const profile = profileMap.get(partnerId)
-          if (!profile) return null
-
-          return {
-            match,
-            profile,
-            lastMessage: lastMessageMap.get(match.id) || null,
-            unreadCount: unreadCountMap.get(match.id) || 0,
-          }
-        })
-        .filter((item): item is MatchWithProfile => item !== null)
-        .sort((a, b) => {
-          const aTime = a.lastMessage?.created_at || a.match.created_at
-          const bTime = b.lastMessage?.created_at || b.match.created_at
-          return new Date(bTime).getTime() - new Date(aTime).getTime()
-        })
-    },
+      ),
     staleTime: 30 * 1000,
   })
 }

@@ -7,12 +7,15 @@ import { z } from 'zod'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, X, Plus } from 'lucide-react'
+import { Loader2 } from 'lucide-react'
 import { LOOKING_FOR_LABELS } from '@/lib/constants'
 import { useUpdateProfile } from '@/hooks/use-profile'
+import { useTagList } from '@/hooks/use-tag-list'
+import { AvatarUpload } from './AvatarUpload'
+import { TagInputCard } from './TagInputCard'
 import { toast } from 'sonner'
 import type { Profile } from '@/types/database'
 
@@ -33,10 +36,10 @@ interface ProfileFormProps {
 
 export function ProfileForm({ profile, onCancel, onSuccess }: ProfileFormProps) {
   const updateProfile = useUpdateProfile()
-  const [skills, setSkills] = useState<string[]>(profile.skills || [])
-  const [interests, setInterests] = useState<string[]>(profile.interests || [])
-  const [newSkill, setNewSkill] = useState('')
-  const [newInterest, setNewInterest] = useState('')
+  const [avatarUrl, setAvatarUrl] = useState<string | null>(profile.avatar_url)
+
+  const skillsTag = useTagList(profile.skills || [])
+  const interestsTag = useTagList(profile.interests || [])
 
   const {
     register,
@@ -56,8 +59,9 @@ export function ProfileForm({ profile, onCancel, onSuccess }: ProfileFormProps) 
     try {
       await updateProfile.mutateAsync({
         ...data,
-        skills,
-        interests,
+        avatar_url: avatarUrl,
+        skills: skillsTag.tags,
+        interests: interestsTag.tags,
       })
       toast.success('プロフィールを更新しました')
       onSuccess()
@@ -66,32 +70,23 @@ export function ProfileForm({ profile, onCancel, onSuccess }: ProfileFormProps) 
     }
   }
 
-  const addSkill = () => {
-    const trimmed = newSkill.trim()
-    if (trimmed && !skills.includes(trimmed)) {
-      setSkills([...skills, trimmed])
-      setNewSkill('')
-    }
-  }
-
-  const removeSkill = (skill: string) => {
-    setSkills(skills.filter(s => s !== skill))
-  }
-
-  const addInterest = () => {
-    const trimmed = newInterest.trim()
-    if (trimmed && !interests.includes(trimmed)) {
-      setInterests([...interests, trimmed])
-      setNewInterest('')
-    }
-  }
-
-  const removeInterest = (interest: string) => {
-    setInterests(interests.filter(i => i !== interest))
-  }
-
   return (
     <form onSubmit={handleSubmit(onSubmit)} className="space-y-6">
+      {/* Avatar Upload */}
+      <Card>
+        <CardHeader>
+          <CardTitle>プロフィール写真</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <AvatarUpload
+            userId={profile.id}
+            currentUrl={avatarUrl}
+            displayName={profile.display_name}
+            onUpload={(url) => setAvatarUrl(url || null)}
+          />
+        </CardContent>
+      </Card>
+
       <Card>
         <CardHeader>
           <CardTitle>基本情報</CardTitle>
@@ -111,12 +106,11 @@ export function ProfileForm({ profile, onCancel, onSuccess }: ProfileFormProps) 
 
           <div className="space-y-2">
             <Label htmlFor="bio">自己紹介</Label>
-            <textarea
+            <Textarea
               id="bio"
               {...register('bio')}
               placeholder="自己紹介を入力"
               rows={4}
-              className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-ring"
             />
             {errors.bio && (
               <p className="text-sm text-destructive">{errors.bio.message}</p>
@@ -156,81 +150,25 @@ export function ProfileForm({ profile, onCancel, onSuccess }: ProfileFormProps) 
         </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>スキル</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              value={newSkill}
-              onChange={(e) => setNewSkill(e.target.value)}
-              placeholder="スキルを追加"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  addSkill()
-                }
-              }}
-            />
-            <Button type="button" variant="outline" size="icon" onClick={addSkill}>
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {skills.map((skill) => (
-              <Badge key={skill} variant="secondary" className="pr-1">
-                {skill}
-                <button
-                  type="button"
-                  onClick={() => removeSkill(skill)}
-                  className="ml-1 rounded-full p-0.5 hover:bg-muted"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <TagInputCard
+        title="スキル"
+        placeholder="スキルを追加"
+        tags={skillsTag.tags}
+        inputValue={skillsTag.inputValue}
+        onInputChange={skillsTag.setInputValue}
+        onAdd={skillsTag.addTag}
+        onRemove={skillsTag.removeTag}
+      />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>興味・関心</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex gap-2">
-            <Input
-              value={newInterest}
-              onChange={(e) => setNewInterest(e.target.value)}
-              placeholder="興味・関心を追加"
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault()
-                  addInterest()
-                }
-              }}
-            />
-            <Button type="button" variant="outline" size="icon" onClick={addInterest}>
-              <Plus className="h-4 w-4" />
-            </Button>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            {interests.map((interest) => (
-              <Badge key={interest} variant="secondary" className="pr-1">
-                {interest}
-                <button
-                  type="button"
-                  onClick={() => removeInterest(interest)}
-                  className="ml-1 rounded-full p-0.5 hover:bg-muted"
-                >
-                  <X className="h-3 w-3" />
-                </button>
-              </Badge>
-            ))}
-          </div>
-        </CardContent>
-      </Card>
+      <TagInputCard
+        title="興味・関心"
+        placeholder="興味・関心を追加"
+        tags={interestsTag.tags}
+        inputValue={interestsTag.inputValue}
+        onInputChange={interestsTag.setInputValue}
+        onAdd={interestsTag.addTag}
+        onRemove={interestsTag.removeTag}
+      />
 
       <div className="flex gap-3">
         <Button type="button" variant="outline" className="flex-1" onClick={onCancel}>

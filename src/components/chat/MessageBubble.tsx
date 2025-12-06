@@ -2,6 +2,7 @@
 
 import { cn } from '@/lib/utils'
 import { formatMessageTime } from '@/lib/date-utils'
+import { Check, CheckCheck } from 'lucide-react'
 import type { ChatMessage } from '@/hooks/use-messages'
 
 interface MessageBubbleProps {
@@ -25,14 +26,40 @@ export function MessageBubble({ message }: MessageBubbleProps) {
         )}
       >
         <p className="text-sm whitespace-pre-wrap break-words">{message.content}</p>
-        <p
+        <div
           className={cn(
-            'text-[10px] mt-1',
-            message.isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground'
+            'flex items-center gap-1 mt-1',
+            message.isOwn ? 'justify-end' : 'justify-start'
           )}
         >
-          {formatMessageTime(message.created_at)}
-        </p>
+          <span
+            className={cn(
+              'text-[10px]',
+              message.isOwn ? 'text-primary-foreground/70' : 'text-muted-foreground'
+            )}
+          >
+            {formatMessageTime(message.created_at)}
+          </span>
+          {message.isOwn && (
+            <div className="ml-1">
+              {message.read_at ? (
+                <CheckCheck
+                  className={cn(
+                    'h-3 w-3',
+                    'text-primary-foreground/70'
+                  )}
+                />
+              ) : (
+                <Check
+                  className={cn(
+                    'h-3 w-3',
+                    'text-primary-foreground/50'
+                  )}
+                />
+              )}
+            </div>
+          )}
+        </div>
       </div>
     </div>
   )

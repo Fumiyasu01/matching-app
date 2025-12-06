@@ -1,8 +1,11 @@
 'use client'
 
+import { useEffect } from 'react'
 import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
 import { Heart, MessageCircle, X } from 'lucide-react'
 import { useRouter } from 'next/navigation'
+import { getGradientByUserId, getInitials } from '@/lib/utils'
+import { notifyMatch } from '@/lib/notifications'
 import type { Profile } from '@/types/database'
 
 interface MatchModalProps {
@@ -12,22 +15,15 @@ interface MatchModalProps {
   currentUserProfile?: Profile | null
 }
 
-// Generate a consistent gradient based on user ID
-function getGradient(id: string): string {
-  const gradients = [
-    'from-cyan-400 to-blue-600',
-    'from-violet-400 to-indigo-600',
-    'from-rose-400 to-fuchsia-600',
-    'from-amber-400 to-red-500',
-    'from-emerald-400 to-cyan-600',
-    'from-lime-400 to-emerald-600',
-  ]
-  const index = id.charCodeAt(0) % gradients.length
-  return gradients[index]
-}
-
 export function MatchModal({ open, onClose, matchedProfile, currentUserProfile }: MatchModalProps) {
   const router = useRouter()
+
+  // マッチしたときに通知を表示
+  useEffect(() => {
+    if (open && matchedProfile) {
+      notifyMatch(matchedProfile)
+    }
+  }, [open, matchedProfile])
 
   if (!matchedProfile) return null
 
@@ -36,11 +32,11 @@ export function MatchModal({ open, onClose, matchedProfile, currentUserProfile }
     router.push('/matches')
   }
 
-  const matchedGradient = getGradient(matchedProfile.id)
-  const currentGradient = currentUserProfile ? getGradient(currentUserProfile.id) : 'from-gray-400 to-gray-600'
+  const matchedGradient = getGradientByUserId(matchedProfile.id)
+  const currentGradient = currentUserProfile ? getGradientByUserId(currentUserProfile.id) : 'from-gray-400 to-gray-600'
 
-  const matchedInitials = matchedProfile.display_name.charAt(0).toUpperCase()
-  const currentInitials = currentUserProfile?.display_name.charAt(0).toUpperCase() || '?'
+  const matchedInitials = getInitials(matchedProfile.display_name)
+  const currentInitials = currentUserProfile ? getInitials(currentUserProfile.display_name) : '?'
 
   return (
     <Dialog open={open} onOpenChange={onClose}>

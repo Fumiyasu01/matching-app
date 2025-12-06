@@ -1,3 +1,6 @@
 export { SwipeCard } from './SwipeCard'
 export { MatchModal } from './MatchModal'
 export { SwipeButtons } from './SwipeButtons'
+export { ProfileDetailModal } from './ProfileDetailModal'
+export { LocationUpdater } from './LocationUpdater'
+export { FilterModal } from './FilterModal'

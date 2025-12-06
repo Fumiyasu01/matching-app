@@ -7,12 +7,22 @@ import { ensureAuthenticated, getCurrentUser } from '@/lib/auth'
 import { queryKeys } from '@/lib/query-keys'
 import { mockStore, mockProfiles } from '@/lib/mock-data'
 import { USE_MOCK_DATA } from '@/lib/config'
+import { withDataSource } from '@/lib/data-source'
+import { notifyMessage } from '@/lib/notifications'
+import { invalidateAfterMessage, invalidateAfterMarkAsRead } from '@/lib/query-invalidation'
 import type { Message, Profile } from '@/types/database'
 
+// ============================================================================
+// Types
+// ============================================================================
 export interface ChatMessage extends Message {
   isOwn: boolean
 }
 
+// ============================================================================
+// Hook: useMessages
+// Fetches and subscribes to messages for a specific match
+// ============================================================================
 export function useMessages(matchId: string) {
   const supabase = createClient()
   const queryClient = useQueryClient()
@@ -20,31 +30,32 @@ export function useMessages(matchId: string) {
 
   const query = useQuery({
     queryKey: queryKeys.messages(matchId),
-    queryFn: async (): Promise<ChatMessage[]> => {
-      // Use mock data if enabled
-      if (USE_MOCK_DATA) {
-        const messages = mockStore.getMessages(matchId)
-        return messages.map(msg => ({
-          ...msg,
-          isOwn: msg.sender_id === 'current-user',
-        }))
-      }
+    queryFn: async (): Promise<ChatMessage[]> =>
+      withDataSource(
+        () => {
+          const messages = mockStore.getMessages(matchId)
+          return messages.map(msg => ({
+            ...msg,
+            isOwn: msg.sender_id === 'current-user',
+          }))
+        },
+        async () => {
+          const user = await ensureAuthenticated()
 
-      const user = await ensureAuthenticated()
+          const { data, error } = await supabase
+            .from('messages')
+            .select('*')
+            .eq('match_id', matchId)
+            .order('created_at', { ascending: true })
 
-      const { data, error } = await supabase
-        .from('messages')
-        .select('*')
-        .eq('match_id', matchId)
-        .order('created_at', { ascending: true })
+          if (error) throw new Error('メッセージの取得に失敗しました')
 
-      if (error) throw new Error('メッセージの取得に失敗しました')
-
-      return (data || []).map(msg => ({
-        ...msg,
-        isOwn: msg.sender_id === user.id,
-      }))
-    },
+          return (data || []).map(msg => ({
+            ...msg,
+            isOwn: msg.sender_id === user.id,
+          }))
+        }
+      ),
     staleTime: 10 * 1000,
     refetchInterval: USE_MOCK_DATA ? 1000 : false, // Poll for mock auto-replies
   })
@@ -56,10 +67,27 @@ export function useMessages(matchId: string) {
       if (currentCount > lastMessageCountRef.current && lastMessageCountRef.current > 0) {
         // New message arrived, invalidate matches to update unread count
         queryClient.invalidateQueries({ queryKey: queryKeys.matches })
+
+        // 最新メッセージが自分のものでない場合は通知を表示
+        const latestMessage = query.data[query.data.length - 1]
+        if (latestMessage && !latestMessage.isOwn) {
+          // 送信者のプロフィールを取得して通知
+          const partnerData = queryClient.getQueryData<Profile>(
+            queryKeys.chatPartner(matchId)
+          )
+          if (partnerData) {
+            notifyMessage(
+              partnerData.display_name,
+              latestMessage.content,
+              matchId,
+              partnerData.avatar_url || undefined
+            )
+          }
+        }
       }
       lastMessageCountRef.current = currentCount
     }
-  }, [query.data, queryClient])
+  }, [query.data, queryClient, matchId])
 
   // Realtimeサブスクリプション (only for real mode)
   useEffect(() => {
@@ -75,9 +103,28 @@ export function useMessages(matchId: string) {
           table: 'messages',
           filter: `match_id=eq.${matchId}`,
         },
-        () => {
-          queryClient.invalidateQueries({ queryKey: queryKeys.messages(matchId) })
-          queryClient.invalidateQueries({ queryKey: queryKeys.matches })
+        async (payload) => {
+          // 新しいメッセージを取得
+          const newMessage = payload.new as Message
+
+          // 自分のメッセージでない場合は通知を表示
+          const user = await getCurrentUser()
+          if (user && newMessage.sender_id !== user.id) {
+            // 送信者のプロフィールを取得して通知
+            const partnerData = queryClient.getQueryData<Profile>(
+              queryKeys.chatPartner(matchId)
+            )
+            if (partnerData) {
+              notifyMessage(
+                partnerData.display_name,
+                newMessage.content,
+                matchId,
+                partnerData.avatar_url || undefined
+              )
+            }
+          }
+
+          invalidateAfterMessage(queryClient, matchId)
         }
       )
       .subscribe()
@@ -90,105 +137,118 @@ export function useMessages(matchId: string) {
   return query
 }
 
+// ============================================================================
+// Hook: useSendMessage
+// Sends a new message in a match
+// ============================================================================
 export function useSendMessage(matchId: string) {
   const supabase = createClient()
   const queryClient = useQueryClient()
 
   return useMutation({
-    mutationFn: async (content: string) => {
-      // Use mock data if enabled
-      if (USE_MOCK_DATA) {
-        mockStore.addMessage(matchId, content, 'current-user')
-        return
-      }
+    mutationFn: async (content: string) =>
+      withDataSource(
+        () => {
+          mockStore.addMessage(matchId, content, 'current-user')
+        },
+        async () => {
+          const user = await ensureAuthenticated()
 
-      const user = await ensureAuthenticated()
+          const { error } = await supabase
+            .from('messages')
+            .insert({
+              match_id: matchId,
+              sender_id: user.id,
+              content,
+            })
 
-      const { error } = await supabase
-        .from('messages')
-        .insert({
-          match_id: matchId,
-          sender_id: user.id,
-          content,
-        })
-
-      if (error) throw new Error('メッセージの送信に失敗しました')
-    },
+          if (error) throw new Error('メッセージの送信に失敗しました')
+        }
+      ),
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.messages(matchId) })
-      queryClient.invalidateQueries({ queryKey: queryKeys.matches })
+      invalidateAfterMessage(queryClient, matchId)
     },
   })
 }
 
+// ============================================================================
+// Hook: useMarkAsRead
+// Marks all unread messages in a match as read
+// ============================================================================
 export function useMarkAsRead(matchId: string) {
   const supabase = createClient()
   const queryClient = useQueryClient()
 
   const mutate = useCallback(async () => {
-    // Use mock data if enabled
-    if (USE_MOCK_DATA) {
-      mockStore.markAsRead(matchId)
-      queryClient.invalidateQueries({ queryKey: queryKeys.matches })
-      return
-    }
+    await withDataSource(
+      () => {
+        mockStore.markAsRead(matchId)
+        invalidateAfterMarkAsRead(queryClient)
+      },
+      async () => {
+        const user = await getCurrentUser()
+        if (!user) return
 
-    const user = await getCurrentUser()
-    if (!user) return
+        await supabase
+          .from('messages')
+          .update({ read_at: new Date().toISOString() })
+          .eq('match_id', matchId)
+          .neq('sender_id', user.id)
+          .is('read_at', null)
 
-    await supabase
-      .from('messages')
-      .update({ read_at: new Date().toISOString() })
-      .eq('match_id', matchId)
-      .neq('sender_id', user.id)
-      .is('read_at', null)
-
-    queryClient.invalidateQueries({ queryKey: queryKeys.matches })
+        invalidateAfterMarkAsRead(queryClient)
+      }
+    )
   }, [matchId, supabase, queryClient])
 
   return { mutate }
 }
 
+// ============================================================================
+// Hook: useChatPartner
+// Fetches the profile of the chat partner in a match
+// ============================================================================
 export function useChatPartner(matchId: string) {
   const supabase = createClient()
 
   return useQuery({
     queryKey: queryKeys.chatPartner(matchId),
-    queryFn: async (): Promise<Profile> => {
-      // Use mock data if enabled
-      if (USE_MOCK_DATA) {
-        const match = mockStore.getMatch(matchId)
-        if (!match) throw new Error('マッチが見つかりません')
+    queryFn: async (): Promise<Profile> =>
+      withDataSource(
+        () => {
+          const match = mockStore.getMatch(matchId)
+          if (!match) throw new Error('マッチが見つかりません')
 
-        const partnerId = match.user1_id === 'current-user' ? match.user2_id : match.user1_id
-        const profile = mockProfiles.find(p => p.id === partnerId)
+          const partnerId = match.user1_id === 'current-user' ? match.user2_id : match.user1_id
+          const profile = mockProfiles.find(p => p.id === partnerId)
 
-        if (!profile) throw new Error('プロフィールが見つかりません')
-        return profile
-      }
+          if (!profile) throw new Error('プロフィールが見つかりません')
+          return profile
+        },
+        async () => {
+          const user = await ensureAuthenticated()
 
-      const user = await ensureAuthenticated()
+          const { data: match, error: matchError } = await supabase
+            .from('matches')
+            .select('*')
+            .eq('id', matchId)
+            .single()
 
-      const { data: match, error: matchError } = await supabase
-        .from('matches')
-        .select('*')
-        .eq('id', matchId)
-        .single()
+          if (matchError || !match) throw new Error('マッチが見つかりません')
 
-      if (matchError || !match) throw new Error('マッチが見つかりません')
+          const partnerId = match.user1_id === user.id ? match.user2_id : match.user1_id
 
-      const partnerId = match.user1_id === user.id ? match.user2_id : match.user1_id
+          const { data: profile, error: profileError } = await supabase
+            .from('profiles')
+            .select('*')
+            .eq('id', partnerId)
+            .single()
 
-      const { data: profile, error: profileError } = await supabase
-        .from('profiles')
-        .select('*')
-        .eq('id', partnerId)
-        .single()
+          if (profileError || !profile) throw new Error('プロフィールが見つかりません')
 
-      if (profileError || !profile) throw new Error('プロフィールが見つかりません')
-
-      return profile
-    },
+          return profile
+        }
+      ),
     staleTime: 5 * 60 * 1000,
   })
 }

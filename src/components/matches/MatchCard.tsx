@@ -2,30 +2,17 @@
 
 import Link from 'next/link'
 import { formatDistanceToNow } from '@/lib/date-utils'
+import { getGradientByUserId, getInitials } from '@/lib/utils'
 import type { MatchWithProfile } from '@/hooks/use-matches'
 
 interface MatchCardProps {
   data: MatchWithProfile
 }
 
-// Generate a consistent gradient based on user ID
-function getGradient(id: string): string {
-  const gradients = [
-    'from-cyan-400 to-blue-500',
-    'from-violet-400 to-purple-500',
-    'from-rose-400 to-pink-500',
-    'from-amber-400 to-orange-500',
-    'from-emerald-400 to-teal-500',
-    'from-lime-400 to-green-500',
-  ]
-  const index = id.charCodeAt(0) % gradients.length
-  return gradients[index]
-}
-
 export function MatchCard({ data }: MatchCardProps) {
   const { match, profile, lastMessage, unreadCount } = data
-  const gradient = getGradient(profile.id)
-  const initials = profile.display_name.charAt(0).toUpperCase()
+  const gradient = getGradientByUserId(profile.id)
+  const initials = getInitials(profile.display_name)
   const hasUnread = unreadCount > 0
 
   return (

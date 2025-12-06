@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { MapPin, Briefcase, Pencil } from 'lucide-react'
 import { LOOKING_FOR_LABELS } from '@/lib/constants'
 import { LogoutButton } from '@/components/auth/LogoutButton'
+import { AvailabilitySlotsSection } from './AvailabilitySlotsSection'
 import type { Profile } from '@/types/database'
 
 interface ProfileViewProps {
@@ -50,6 +51,8 @@ export function ProfileView({ profile, onEdit }: ProfileViewProps) {
           </div>
         </CardContent>
       </Card>
+
+      <AvailabilitySlotsSection />
 
       {profile.skills.length > 0 && (
         <Card>

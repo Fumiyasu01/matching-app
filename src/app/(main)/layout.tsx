@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation'
 import { createClient } from '@/lib/supabase/server'
 import { BottomNav } from '@/components/layout/BottomNav'
+import { NotificationBanner } from '@/components/notifications/NotificationBanner'
 
 export default async function MainLayout({
   children,
@@ -16,6 +17,7 @@ export default async function MainLayout({
 
   return (
     <div className="min-h-screen pb-16">
+      <NotificationBanner />
       <main className="container mx-auto max-w-lg px-4 py-4">
         {children}
       </main>

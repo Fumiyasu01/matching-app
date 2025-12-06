@@ -4,6 +4,8 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import { createClient } from '@/lib/supabase/client'
 import { ensureAuthenticated } from '@/lib/auth'
 import { queryKeys } from '@/lib/query-keys'
+import { sanitizeDisplayName, sanitizeUserInput, sanitizeStringArray } from '@/lib/sanitize'
+import { invalidateAfterProfileUpdate } from '@/lib/query-invalidation'
 import type { Profile, ProfileUpdate } from '@/types/database'
 
 export function useProfile() {
@@ -37,15 +39,25 @@ export function useUpdateProfile() {
     mutationFn: async (updates: ProfileUpdate) => {
       const user = await ensureAuthenticated()
 
+      // Sanitize user inputs before saving
+      const sanitizedUpdates: ProfileUpdate = {
+        ...updates,
+        display_name: updates.display_name ? sanitizeDisplayName(updates.display_name) : undefined,
+        bio: updates.bio ? sanitizeUserInput(updates.bio).slice(0, 500) : updates.bio,
+        location: updates.location ? sanitizeUserInput(updates.location).slice(0, 100) : updates.location,
+        skills: updates.skills ? sanitizeStringArray(updates.skills) : undefined,
+        interests: updates.interests ? sanitizeStringArray(updates.interests) : undefined,
+      }
+
       const { error } = await supabase
         .from('profiles')
-        .update(updates)
+        .update(sanitizedUpdates)
         .eq('id', user.id)
 
       if (error) throw new Error('プロフィールの更新に失敗しました')
     },
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: queryKeys.profile })
+      invalidateAfterProfileUpdate(queryClient)
     },
   })
 }

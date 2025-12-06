@@ -28,10 +28,16 @@ export function MessageInput({ onSend, disabled }: MessageInputProps) {
     return () => window.removeEventListener('resize', checkMobile)
   }, [])
 
+  const MAX_MESSAGE_LENGTH = 5000
+
   const handleSubmit = (e?: React.FormEvent) => {
     e?.preventDefault()
     const trimmed = message.trim()
     if (!trimmed) return
+    if (trimmed.length > MAX_MESSAGE_LENGTH) {
+      alert(`メッセージは${MAX_MESSAGE_LENGTH}文字以内で入力してください`)
+      return
+    }
     onSend(trimmed)
     setMessage('')
   }
