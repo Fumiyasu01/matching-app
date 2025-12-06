@@ -11,7 +11,7 @@ import type { SwipeDirection } from '@/hooks/use-swipe'
 import { LoadingState } from '@/components/ui/loading-state'
 import { ErrorState } from '@/components/ui/error-state'
 import { Badge } from '@/components/ui/badge'
-import { Users, Sparkles, SlidersHorizontal } from 'lucide-react'
+import { Users, SlidersHorizontal } from 'lucide-react'
 import type { ProfileWithDetails } from '@/types/database'
 
 export default function DiscoverPage() {
@@ -143,9 +143,6 @@ export default function DiscoverPage() {
                 {activeFilterCount}
               </Badge>
             )}
-          </button>
-          <button className="h-10 w-10 rounded-full bg-gradient-to-br from-cyan-400 to-cyan-600 flex items-center justify-center shadow-md">
-            <Sparkles className="h-5 w-5 text-white" />
           </button>
         </div>
       </div>

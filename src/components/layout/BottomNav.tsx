@@ -2,13 +2,12 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Flame, MessageCircle, User, Settings } from 'lucide-react'
+import { Flame, MessageCircle, User } from 'lucide-react'
 
 const navItems = [
   { href: '/discover', icon: Flame, label: '探す' },
   { href: '/matches', icon: MessageCircle, label: 'チャット' },
   { href: '/profile', icon: User, label: 'マイページ' },
-  { href: '/settings', icon: Settings, label: '設定' },
 ]
 
 export function BottomNav() {
